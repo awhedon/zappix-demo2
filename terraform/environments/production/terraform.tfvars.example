@@ -1,0 +1,17 @@
+# AWS Configuration
+aws_region = "us-east-1"
+
+# Domain Configuration
+frontend_domain = "zappix2.aldea.ai"
+backend_domain  = "zappix2-backend.aldea.ai"
+
+# Route53 and ACM Configuration
+# Get the hosted zone ID from Route53 console
+hosted_zone_id = "ZXXXXXXXXXX"
+
+# ACM certificate for CloudFront (MUST be in us-east-1)
+certificate_arn = "arn:aws:acm:us-east-1:XXXXXXXXXXXX:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# ACM certificate for ALB (can be regional)
+backend_certificate_arn = "arn:aws:acm:us-east-1:XXXXXXXXXXXX:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+

@@ -1,0 +1,190 @@
+@import url('https://api.fontshare.com/v2/css?f[]=clash-display@600,700,500&f[]=satoshi@400,500,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-navy: #0a1628;
+  --color-blue: #1e3a5f;
+  --color-accent: #00d4aa;
+  --color-gold: #ffd700;
+  --gradient-start: #0a1628;
+  --gradient-end: #1e3a5f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Satoshi', system-ui, -apple-system, sans-serif;
+  background: var(--color-navy);
+  color: #f8fafc;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 212, 170, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 212, 170, 0.5);
+}
+
+/* Glassmorphism card */
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 24px;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #00d4aa 0%, #7c3aed 50%, #ffd700 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Animated gradient background */
+.animated-gradient {
+  background: linear-gradient(-45deg, #0a1628, #1e3a5f, #0f3443, #0a1628);
+  background-size: 400% 400%;
+  animation: gradient 15s ease infinite;
+}
+
+/* Glow effect */
+.glow {
+  box-shadow: 0 0 40px rgba(0, 212, 170, 0.15);
+}
+
+.glow-accent {
+  box-shadow: 0 0 60px rgba(0, 212, 170, 0.25);
+}
+
+/* Form field styling */
+.form-field {
+  @apply relative bg-white/5 border border-white/10 rounded-xl px-4 py-4 transition-all duration-300;
+}
+
+.form-field:hover {
+  @apply border-white/20 bg-white/8;
+}
+
+.form-field-label {
+  @apply text-xs font-medium text-zappix-accent uppercase tracking-wider mb-1;
+}
+
+.form-field-value {
+  @apply text-lg font-medium text-white;
+}
+
+/* Button styling */
+.btn-primary {
+  @apply relative inline-flex items-center justify-center px-8 py-4 text-lg font-semibold text-zappix-navy bg-zappix-accent rounded-xl overflow-hidden transition-all duration-300;
+}
+
+.btn-primary::before {
+  content: '';
+  @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full transition-transform duration-700;
+}
+
+.btn-primary:hover::before {
+  @apply translate-x-full;
+}
+
+.btn-primary:hover {
+  @apply scale-105 shadow-lg shadow-zappix-accent/30;
+}
+
+/* Signature pad styling */
+.signature-pad {
+  @apply relative bg-white rounded-xl overflow-hidden;
+  touch-action: none;
+}
+
+.signature-pad canvas {
+  @apply w-full h-full;
+}
+
+/* Loading spinner */
+.spinner {
+  @apply w-8 h-8 border-4 border-zappix-accent/30 border-t-zappix-accent rounded-full animate-spin;
+}
+
+/* Floating shapes */
+.floating-shape {
+  @apply absolute rounded-full opacity-20 blur-3xl;
+  animation: float 8s ease-in-out infinite;
+}
+
+/* Grid pattern overlay */
+.grid-pattern {
+  background-image: 
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* Success animation */
+@keyframes checkmark {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.checkmark-circle {
+  stroke-dasharray: 166;
+  stroke-dashoffset: 166;
+  stroke-width: 2;
+  stroke-miterlimit: 10;
+  stroke: #00d4aa;
+  fill: none;
+  animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+
+.checkmark-check {
+  transform-origin: 50% 50%;
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards;
+}
+
+@keyframes stroke {
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .glass-card {
+    border-radius: 16px;
+  }
+  
+  .form-field {
+    @apply px-3 py-3;
+  }
+}
+
