@@ -1,9 +1,15 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"  # Ignore extra fields in .env
+    )
+
     # Application
     app_env: str = "development"
     app_debug: bool = False
@@ -53,10 +59,6 @@ class Settings(BaseSettings):
     smtp_user: str = "apikey"
     smtp_password: str = ""
     notification_email: str = "sales@zappix.com"
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 @lru_cache()
