@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.models.schemas import Language, CallSession
 from app.services.cartesia_tts import cartesia_tts
 from app.services.deepgram_stt import deepgram_stt, DeepgramStreamingSession
+from app.services.zappix_service import zappix_service
 from app.agents.health_assessment_agent import HealthAssessmentAgent, create_health_assessment_agent
 from app.services.session_manager import session_manager
 
@@ -301,8 +302,26 @@ class TwilioMediaStreamHandler:
             await asyncio.sleep(0.04)
 
     async def _on_call_complete(self):
-        """Handle call completion."""
+        """Handle call completion and trigger Zappix flow."""
         logger.info(f"Call complete for session {self.session_id}")
+
+        # Get the latest session data
+        session = await session_manager.get_session(self.session_id)
+        if session:
+            # Mark call as completed
+            await session_manager.mark_call_completed(self.session_id)
+
+            # Create Zappix session and send SMS if user opted in
+            if session.opted_in_for_sms and session.cell_phone_for_sms:
+                try:
+                    success = await zappix_service.create_session_and_send_sms(session)
+                    if success:
+                        logger.info(f"Zappix session created and SMS sent for session {self.session_id}")
+                    else:
+                        logger.error(f"Zappix flow failed for session {self.session_id}")
+                except Exception as e:
+                    logger.error(f"Failed to process Zappix flow: {e}")
+
         if self._ws:
             # Send clear message to stop any pending audio
             if self.stream_sid:

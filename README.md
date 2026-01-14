@@ -8,8 +8,10 @@ A comprehensive conversational AI health assessment demo that integrates voice A
 2. **Authentication** - User authenticates using date of birth, zip code, or SSN (2 of 3)
 3. **Health Assessment** - AI asks a series of health-related questions
 4. **SMS Opt-in** - User opts in to receive a form review link via SMS
-5. **Digital Review** - User reviews and signs the completed form
-6. **Submission** - Form is submitted and emailed to the designated recipient
+5. **Zappix Integration** - Answers are sent to Zappix API to create a session
+6. **SMS Delivery** - Zappix sends SMS with form link to the user
+7. **Digital Review** - User reviews and signs the form in the Zappix IVA (web app)
+8. **Submission** - Form is submitted through Zappix
 
 ## 🛠️ Technology Stack
 
@@ -19,7 +21,8 @@ A comprehensive conversational AI health assessment demo that integrates voice A
   - Deepgram (Speech-to-Text)
   - Cartesia (Text-to-Speech)
   - OpenAI GPT-4 (Conversation)
-- **Telephony**: Twilio (Calls & SMS)
+- **Telephony**: Twilio (Outbound Calls)
+- **Form & SMS**: Zappix API (Session creation & SMS delivery)
 - **Real-time**: LiveKit
 - **Storage**: Redis (Sessions), PostgreSQL (Optional)
 
@@ -208,11 +211,30 @@ zappix-demo2/
 |--------|----------|-------------|
 | POST | `/api/calls/outbound` | Initiate an outbound call |
 | GET | `/api/calls/session/{session_id}` | Get session details |
-| POST | `/api/calls/sms/{session_id}` | Send SMS with form link |
+| POST | `/api/calls/zappix/{session_id}` | Trigger Zappix flow (create session + send SMS) |
+| POST | `/api/calls/sms/{session_id}` | Send SMS via Zappix (deprecated alias) |
 | GET | `/api/forms/{session_id}` | Get pre-populated form data |
 | POST | `/api/forms/{session_id}/submit` | Submit signed form |
 | POST | `/api/twilio/voice/{session_id}` | Twilio voice webhook |
 | WS | `/api/twilio/media-stream/{session_id}` | Real-time audio stream |
+
+## 🔗 Zappix Integration
+
+The demo integrates with the Zappix API for form creation and SMS delivery:
+
+### Step 1: Create Zappix Session
+When the call completes with user opt-in, the backend calls:
+```
+POST https://248ukb6dyi.execute-api.us-east-1.amazonaws.com/qa/api/v1/create-session
+```
+This creates a session with all the user's health assessment answers.
+
+### Step 2: Send SMS via Zappix
+Using the `zappixSid` from step 1:
+```
+GET https://qastudio.zappix.com/mobile_api/v7/send-sms
+```
+Sends an SMS with a link to the Zappix form at `https://qa.zappix.com/app/3606/session/?sid={zappixSid}`
 
 ## 🌍 Multilingual Support
 

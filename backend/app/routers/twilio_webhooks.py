@@ -4,6 +4,7 @@ from fastapi.responses import Response
 
 from app.config import get_settings
 from app.services.twilio_service import twilio_service
+from app.services.zappix_service import zappix_service
 from app.services.session_manager import session_manager
 from app.agents.voice_pipeline import TwilioMediaStreamHandler
 
@@ -53,17 +54,16 @@ async def handle_status_callback(
         if session:
             await session_manager.mark_call_completed(session_id)
 
-            # Send SMS if user opted in
+            # Create Zappix session and send SMS if user opted in
             if session.opted_in_for_sms and session.cell_phone_for_sms:
                 try:
-                    await twilio_service.send_sms(
-                        to_number=session.cell_phone_for_sms,
-                        session_id=session_id,
-                        language=session.language
-                    )
-                    logger.info(f"Sent SMS for completed session {session_id}")
+                    success = await zappix_service.create_session_and_send_sms(session)
+                    if success:
+                        logger.info(f"Zappix session created and SMS sent for session {session_id}")
+                    else:
+                        logger.error(f"Zappix flow failed for session {session_id}")
                 except Exception as e:
-                    logger.error(f"Failed to send SMS: {e}")
+                    logger.error(f"Failed to process Zappix flow: {e}")
 
     return {"status": "ok"}
 
