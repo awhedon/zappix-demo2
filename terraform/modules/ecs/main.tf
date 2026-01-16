@@ -44,7 +44,7 @@ variable "container_memory" {
 
 variable "desired_count" {
   type    = number
-  default = 2
+  default = 1  # Using 1 for in-memory session storage (no Redis)
 }
 
 # ECS Cluster
@@ -289,10 +289,10 @@ resource "aws_ecs_service" "backend" {
   }
 }
 
-# Auto Scaling
+# Auto Scaling (disabled for in-memory session storage - requires single instance)
 resource "aws_appautoscaling_target" "backend" {
-  max_capacity       = 10
-  min_capacity       = var.desired_count
+  max_capacity       = 1  # Keep at 1 while using in-memory sessions
+  min_capacity       = 1
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.backend.name}"
   scalable_dimension = "ecs:service:DesiredCount"
   service_namespace  = "ecs"
