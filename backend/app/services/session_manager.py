@@ -1,27 +1,49 @@
 import json
 import redis.asyncio as redis
-from typing import Optional
+from typing import Optional, Dict
 from datetime import datetime
 import uuid
+import logging
 
 from app.config import get_settings
 from app.models.schemas import CallSession, Language, AuthenticationData, HealthAssessmentAnswers
 
+logger = logging.getLogger(__name__)
+
 
 class SessionManager:
-    """Manages call sessions using Redis for persistence."""
+    """Manages call sessions using Redis for persistence, with in-memory fallback."""
 
     def __init__(self):
         self.settings = get_settings()
         self._redis: Optional[redis.Redis] = None
+        self._redis_available: Optional[bool] = None
+        self._memory_store: Dict[str, str] = {}  # In-memory fallback
 
-    async def get_redis(self) -> redis.Redis:
-        if self._redis is None:
-            self._redis = redis.from_url(
+    async def _check_redis_available(self) -> bool:
+        """Check if Redis is available."""
+        if self._redis_available is not None:
+            return self._redis_available
+        
+        try:
+            client = redis.from_url(
                 self.settings.redis_url,
                 encoding="utf-8",
                 decode_responses=True
             )
+            await client.ping()
+            self._redis = client
+            self._redis_available = True
+            logger.info("Redis connection established")
+        except Exception as e:
+            logger.warning(f"Redis unavailable ({e}), using in-memory session storage")
+            self._redis_available = False
+        
+        return self._redis_available
+
+    async def get_redis(self) -> Optional[redis.Redis]:
+        if not await self._check_redis_available():
+            return None
         return self._redis
 
     async def create_session(
@@ -39,19 +61,26 @@ class SessionManager:
             language=language,
         )
 
+        key = f"session:{session_id}"
+        data = session.model_dump_json()
+        
         r = await self.get_redis()
-        await r.setex(
-            f"session:{session_id}",
-            86400,  # 24 hour TTL
-            session.model_dump_json()
-        )
+        if r:
+            await r.setex(key, 86400, data)  # 24 hour TTL
+        else:
+            self._memory_store[key] = data
 
         return session
 
     async def get_session(self, session_id: str) -> Optional[CallSession]:
         """Retrieve a session by ID."""
+        key = f"session:{session_id}"
+        
         r = await self.get_redis()
-        data = await r.get(f"session:{session_id}")
+        if r:
+            data = await r.get(key)
+        else:
+            data = self._memory_store.get(key)
 
         if data is None:
             return None
@@ -62,12 +91,14 @@ class SessionManager:
         """Update an existing session."""
         session.updated_at = datetime.utcnow()
 
+        key = f"session:{session.session_id}"
+        data = session.model_dump_json()
+        
         r = await self.get_redis()
-        await r.setex(
-            f"session:{session.session_id}",
-            86400,
-            session.model_dump_json()
-        )
+        if r:
+            await r.setex(key, 86400, data)
+        else:
+            self._memory_store[key] = data
 
         return session
 
