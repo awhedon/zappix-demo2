@@ -80,7 +80,7 @@ class TwilioService:
         # Connect to LiveKit via SIP trunk
         connect = Connect()
         connect.stream(
-            url=f"wss://{self.settings.backend_url.replace('https://', '')}/api/media-stream/{session_id}",
+            url=f"wss://{self.settings.backend_url.replace('https://', '')}/api/twilio/media-stream/{session_id}",
             name=f"livekit-{session_id}"
         )
         response.append(connect)
@@ -96,7 +96,7 @@ class TwilioService:
         # Start bidirectional media stream
         start = response.start()
         start.stream(
-            url=f"wss://{self.settings.backend_url.replace('https://', '')}/api/media-stream/{session_id}",
+            url=f"wss://{self.settings.backend_url.replace('https://', '')}/api/twilio/media-stream/{session_id}",
             track="both_tracks"
         )
 
