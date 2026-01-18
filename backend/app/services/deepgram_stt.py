@@ -131,7 +131,7 @@ class DeepgramStreamingSession:
 
         self.ws = await websockets.connect(
             url,
-            extra_headers={"Authorization": f"Token {self.api_key}"}
+            additional_headers={"Authorization": f"Token {self.api_key}"}
         )
 
         self._running = True
