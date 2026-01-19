@@ -55,26 +55,41 @@ class VoicePipeline:
         self._audio_buffer = bytearray()
 
     async def start(self):
-        """Start the voice pipeline."""
+        """Start the voice pipeline (full initialization including greeting)."""
+        await self.start_without_greeting()
+        await self.speak_greeting()
+
+    async def start_without_greeting(self):
+        """Start the voice pipeline without speaking the greeting yet."""
         logger.info(f"Starting voice pipeline for session {self.session.session_id}")
 
         # Initialize agent
         self.agent = create_health_assessment_agent()
         await self.agent.initialize(self.session)
 
-        # Initialize STT
-        self.stt_session = await deepgram_stt.create_streaming_connection(
-            language=self.session.language,
-            detect_language=True,
-            on_transcript=self._on_transcript
-        )
-        await self.stt_session.connect()
+        # Initialize STT (allow failure - we can still do TTS)
+        try:
+            self.stt_session = await deepgram_stt.create_streaming_connection(
+                language=self.session.language,
+                detect_language=True,
+                on_transcript=self._on_transcript
+            )
+            await self.stt_session.connect()
+            logger.info("STT session initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize STT (continuing without it): {e}")
+            self.stt_session = None
 
         self._running = True
 
-        # Generate and speak initial greeting
-        greeting = await self.agent.get_initial_greeting()
-        await self._speak(greeting)
+    async def speak_greeting(self):
+        """Generate and speak the initial greeting."""
+        try:
+            greeting = await self.agent.get_initial_greeting()
+            logger.info(f"Speaking greeting: {greeting[:50]}...")
+            await self._speak(greeting)
+        except Exception as e:
+            logger.error(f"Failed to speak greeting: {e}")
 
     async def stop(self):
         """Stop the voice pipeline."""
@@ -95,15 +110,9 @@ class VoicePipeline:
         if not self._running or self._speaking:
             return
 
-        # Convert mulaw to linear PCM if needed
-        pcm_data = self._mulaw_to_linear(audio_data)
-
-        # Upsample from 8kHz to 16kHz for Deepgram
-        upsampled = self._upsample_audio(pcm_data, 8000, 16000)
-
-        # Send to Deepgram for transcription
+        # Send raw mulaw audio directly to Deepgram (it expects mulaw at 8kHz)
         if self.stt_session:
-            await self.stt_session.send_audio(upsampled)
+            await self.stt_session.send_audio(audio_data)
 
     def _on_transcript(self, text: str, is_final: bool, detected_language: Optional[str]):
         """Callback for Deepgram transcripts."""
@@ -163,9 +172,11 @@ class VoicePipeline:
                 text,
                 language=self.session.language
             )
+            logger.info(f"TTS returned {len(audio_bytes)} bytes of audio")
 
             # Convert from 24kHz PCM to 8kHz mulaw for Twilio
             mulaw_audio = self._convert_for_twilio(audio_bytes)
+            logger.info(f"Converted to {len(mulaw_audio)} bytes of mulaw audio")
 
             # Send audio to Twilio
             await self.on_audio_output(mulaw_audio)
@@ -214,6 +225,7 @@ class TwilioMediaStreamHandler:
         self.pipeline: Optional[VoicePipeline] = None
         self.stream_sid: Optional[str] = None
         self._ws = None
+        self._stream_ready = asyncio.Event()
 
     async def handle_websocket(self, websocket):
         """Handle the WebSocket connection from Twilio."""
@@ -233,16 +245,33 @@ class TwilioMediaStreamHandler:
         )
 
         try:
-            await self.pipeline.start()
-
-            async for message in websocket.iter_text():
-                await self._handle_message(message)
+            # Start pipeline initialization (STT, agent) but don't speak yet
+            await self.pipeline.start_without_greeting()
+            
+            # Start processing messages in background
+            message_task = asyncio.create_task(self._process_messages(websocket))
+            
+            # Wait for stream to be ready (with timeout)
+            try:
+                await asyncio.wait_for(self._stream_ready.wait(), timeout=10.0)
+                logger.info("Stream ready, speaking greeting")
+                await self.pipeline.speak_greeting()
+            except asyncio.TimeoutError:
+                logger.error("Timeout waiting for stream to start")
+            
+            # Wait for message processing to complete
+            await message_task
 
         except Exception as e:
             logger.error(f"WebSocket error: {e}")
         finally:
             if self.pipeline:
                 await self.pipeline.stop()
+
+    async def _process_messages(self, websocket):
+        """Process incoming WebSocket messages from Twilio."""
+        async for message in websocket.iter_text():
+            await self._handle_message(message)
 
     async def _handle_message(self, message: str):
         """Handle incoming WebSocket message from Twilio."""
@@ -253,6 +282,7 @@ class TwilioMediaStreamHandler:
             if event_type == "start":
                 self.stream_sid = data.get("streamSid")
                 logger.info(f"Media stream started: {self.stream_sid}")
+                self._stream_ready.set()  # Signal that stream is ready
 
             elif event_type == "media":
                 # Incoming audio from caller
@@ -283,10 +313,14 @@ class TwilioMediaStreamHandler:
     async def _send_audio(self, audio_data: bytes):
         """Send audio to Twilio via WebSocket."""
         if not self._ws or not self.stream_sid:
+            logger.warning(f"Cannot send audio: ws={bool(self._ws)}, stream_sid={self.stream_sid}")
             return
+
+        logger.info(f"Sending {len(audio_data)} bytes of audio to Twilio stream {self.stream_sid}")
 
         # Twilio expects base64-encoded audio in chunks
         chunk_size = 640  # 40ms of 8kHz mulaw audio
+        chunks_sent = 0
 
         for i in range(0, len(audio_data), chunk_size):
             chunk = audio_data[i:i + chunk_size]
@@ -297,9 +331,16 @@ class TwilioMediaStreamHandler:
                     "payload": base64.b64encode(chunk).decode("utf-8")
                 }
             }
-            await self._ws.send_text(json.dumps(message))
+            try:
+                await self._ws.send_text(json.dumps(message))
+                chunks_sent += 1
+            except Exception as e:
+                logger.error(f"Error sending audio chunk {chunks_sent}: {e}")
+                break
             # Small delay to control playback speed
             await asyncio.sleep(0.04)
+        
+        logger.info(f"Sent {chunks_sent} audio chunks to Twilio")
 
     async def _on_call_complete(self):
         """Handle call completion and trigger Zappix flow."""

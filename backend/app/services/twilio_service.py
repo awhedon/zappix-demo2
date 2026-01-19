@@ -89,20 +89,17 @@ class TwilioService:
 
     def generate_media_stream_twiml(self, session_id: str) -> str:
         """
-        Generate TwiML to start a media stream for real-time audio processing.
+        Generate TwiML to start a bidirectional media stream for real-time audio processing.
+        Uses <Connect><Stream> for bidirectional audio (sending audio back to caller).
         """
         response = VoiceResponse()
 
-        # Start bidirectional media stream
-        start = response.start()
-        start.stream(
-            url=f"wss://{self.settings.backend_url.replace('https://', '')}/api/twilio/media-stream/{session_id}",
-            track="both_tracks"
+        # Use Connect for bidirectional media stream
+        connect = Connect()
+        connect.stream(
+            url=f"wss://{self.settings.backend_url.replace('https://', '')}/api/twilio/media-stream/{session_id}"
         )
-
-        # Keep the call alive
-        response.say("", voice="alice")
-        response.pause(length=3600)  # 1 hour max
+        response.append(connect)
 
         return str(response)
 

@@ -1,7 +1,7 @@
 import httpx
 import logging
 import asyncio
-from typing import AsyncGenerator, Optional, Callable
+from typing import Optional, Callable
 import json
 import websockets
 
@@ -15,11 +15,19 @@ class DeepgramSTT:
     """Speech-to-Text service using Deepgram API."""
 
     def __init__(self):
-        self.settings = get_settings()
-        self.base_url = self.settings.deepgram_base_url
-        self.api_key = self.settings.deepgram_api_key
+        # Don't cache settings at init time - read them lazily
+        pass
+    
+    @property
+    def base_url(self) -> str:
+        return get_settings().deepgram_base_url
+    
+    @property
+    def api_key(self) -> str:
+        return get_settings().deepgram_api_key
 
-    def get_language_code(self, language: Language) -> str:
+    @staticmethod
+    def get_language_code(language: Language) -> str:
         """Get Deepgram language code."""
         if language == Language.SPANISH:
             return "es"
@@ -46,11 +54,14 @@ class DeepgramSTT:
         else:
             params["language"] = self.get_language_code(language)
 
+        base_url = self.base_url
+        api_key = self.api_key
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{self.base_url}/v1/listen",
+                f"{base_url}/v1/listen",
                 headers={
-                    "Authorization": f"Token {self.api_key}",
+                    "Authorization": f"Token {api_key}",
                     "Content-Type": "audio/raw"
                 },
                 params=params,
@@ -72,14 +83,6 @@ class DeepgramSTT:
     ):
         """
         Create a streaming WebSocket connection to Deepgram.
-
-        Args:
-            language: The language to transcribe
-            detect_language: Whether to auto-detect language
-            on_transcript: Callback function(text, is_final, detected_language)
-
-        Returns:
-            DeepgramStreamingSession
         """
         return DeepgramStreamingSession(
             api_key=self.api_key,
@@ -109,35 +112,51 @@ class DeepgramStreamingSession:
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self._running = False
         self._receive_task: Optional[asyncio.Task] = None
+        self._connected = False
 
     async def connect(self):
         """Establish WebSocket connection to Deepgram."""
+        # Simplified parameters - use specific language instead of detect_language
+        lang_code = "es" if self.language == Language.SPANISH else "en-US"
+        
         params = [
             "model=nova-2",
-            "smart_format=true",
+            f"language={lang_code}",
             "punctuate=true",
             "interim_results=true",
             "endpointing=300",
-            "vad_events=true",
+            "encoding=mulaw",
+            "sample_rate=8000",
+            "channels=1",
         ]
 
-        if self.detect_language:
-            params.append("detect_language=true")
-        else:
-            lang_code = "es" if self.language == Language.SPANISH else "en-US"
-            params.append(f"language={lang_code}")
-
         url = f"{self.base_url}/v1/listen?{'&'.join(params)}"
+        
+        logger.info(f"Attempting Deepgram connection to: {url}")
+        logger.info(f"API key present: {bool(self.api_key)}, length: {len(self.api_key) if self.api_key else 0}")
 
-        self.ws = await websockets.connect(
-            url,
-            additional_headers={"Authorization": f"Token {self.api_key}"}
-        )
+        try:
+            self.ws = await websockets.connect(
+                url,
+                additional_headers={"Authorization": f"Token {self.api_key}"},
+                ping_interval=20,
+                ping_timeout=10,
+            )
 
-        self._running = True
-        self._receive_task = asyncio.create_task(self._receive_loop())
+            self._running = True
+            self._connected = True
+            self._receive_task = asyncio.create_task(self._receive_loop())
 
-        logger.info("Connected to Deepgram streaming")
+            logger.info("Connected to Deepgram streaming successfully")
+        except websockets.exceptions.InvalidStatusCode as e:
+            logger.error(f"Deepgram rejected connection with HTTP {e.status_code}")
+            if hasattr(e, 'headers'):
+                logger.error(f"Response headers: {dict(e.headers)}")
+            self._connected = False
+        except Exception as e:
+            logger.error(f"Failed to connect to Deepgram: {type(e).__name__}: {e}")
+            self._connected = False
+            # Don't raise - allow pipeline to continue without STT
 
     async def _receive_loop(self):
         """Background task to receive transcripts from Deepgram."""
@@ -161,7 +180,10 @@ class DeepgramStreamingSession:
             except asyncio.TimeoutError:
                 # Send keepalive
                 if self.ws:
-                    await self.ws.send(json.dumps({"type": "KeepAlive"}))
+                    try:
+                        await self.ws.send(json.dumps({"type": "KeepAlive"}))
+                    except:
+                        pass
             except websockets.exceptions.ConnectionClosed:
                 logger.info("Deepgram connection closed")
                 break
@@ -171,17 +193,22 @@ class DeepgramStreamingSession:
 
     async def send_audio(self, audio_data: bytes):
         """Send audio data to Deepgram for transcription."""
-        if self.ws:
-            await self.ws.send(audio_data)
+        if self.ws and self._connected:
+            try:
+                await self.ws.send(audio_data)
+            except Exception as e:
+                logger.error(f"Error sending audio to Deepgram: {e}")
 
     async def close(self):
         """Close the Deepgram connection."""
         self._running = False
 
         if self.ws:
-            # Send close message
-            await self.ws.send(json.dumps({"type": "CloseStream"}))
-            await self.ws.close()
+            try:
+                await self.ws.send(json.dumps({"type": "CloseStream"}))
+                await self.ws.close()
+            except:
+                pass
             self.ws = None
 
         if self._receive_task:
@@ -196,4 +223,3 @@ class DeepgramStreamingSession:
 
 # Singleton instance
 deepgram_stt = DeepgramSTT()
-

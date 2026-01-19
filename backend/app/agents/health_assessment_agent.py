@@ -411,17 +411,25 @@ Return ONLY the JSON object, no other text."""
             return "I'm sorry, I had a moment. Could you please repeat that?"
 
     async def get_initial_greeting(self) -> str:
-        """Generate the initial greeting for the call."""
+        """Return the initial greeting for the call (pre-canned for fast response)."""
         if not self.session:
             raise ValueError("Session not initialized")
 
-        # Add initial context
+        # Use pre-canned greeting for fast response (avoids LLM latency)
+        first_name = self.session.first_name
+        
+        if self.detected_language == Language.SPANISH:
+            greeting = f"Hola {first_name}, soy Aldea llamando de parte de Zappix para su evaluación de salud anual. ¿Puede decir continuar para comenzar?"
+        else:
+            greeting = f"Hi {first_name}, this is Aldea calling from Zappix for your annual health assessment. Please say continue to get started."
+        
+        # Add to conversation history
         self.conversation_history.append({
-            "role": "system",
-            "content": "The call has just connected. Generate the initial greeting."
+            "role": "assistant",
+            "content": greeting
         })
-
-        return await self._generate_response("")
+        
+        return greeting
 
 
 # Factory function

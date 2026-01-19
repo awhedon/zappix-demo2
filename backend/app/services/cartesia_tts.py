@@ -15,15 +15,23 @@ class CartesiaTTS:
     """Text-to-Speech service using Cartesia API."""
 
     def __init__(self):
-        self.settings = get_settings()
-        self.base_url = self.settings.cartesia_base_url
-        self.api_key = self.settings.cartesia_api_key
+        # Don't cache settings at init time - read them lazily
+        pass
+    
+    @property
+    def base_url(self) -> str:
+        return get_settings().cartesia_base_url
+    
+    @property
+    def api_key(self) -> str:
+        return get_settings().cartesia_api_key
 
     def get_voice_id(self, language: Language) -> str:
         """Get the appropriate voice ID based on language."""
+        settings = get_settings()
         if language == Language.SPANISH:
-            return self.settings.cartesia_voice_id_spanish
-        return self.settings.cartesia_voice_id
+            return settings.cartesia_voice_id_spanish
+        return settings.cartesia_voice_id
 
     async def synthesize(
         self,
@@ -41,6 +49,7 @@ class CartesiaTTS:
                 f"{self.base_url}/tts/bytes",
                 headers={
                     "X-API-Key": self.api_key,
+                    "Cartesia-Version": "2025-04-16",
                     "Content-Type": "application/json"
                 },
                 json={
@@ -82,6 +91,7 @@ class CartesiaTTS:
                 f"{self.base_url}/tts/sse",
                 headers={
                     "X-API-Key": self.api_key,
+                    "Cartesia-Version": "2025-04-16",
                     "Content-Type": "application/json"
                 },
                 json={
@@ -129,7 +139,10 @@ class CartesiaTTS:
 
         async with websockets.connect(
             f"{ws_url}/tts/websocket",
-            extra_headers={"X-API-Key": self.api_key}
+            additional_headers={
+                "X-API-Key": self.api_key,
+                "Cartesia-Version": "2025-04-16"
+            }
         ) as ws:
             # Send synthesis request
             await ws.send(json.dumps({

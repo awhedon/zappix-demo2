@@ -37,7 +37,7 @@ class Settings(BaseSettings):
 
     # Cartesia (TTS)
     cartesia_api_key: str = ""
-    cartesia_base_url: str = "http://132.145.196.127:5555"
+    cartesia_base_url: str = "https://api.cartesia.ai"
     cartesia_voice_id: str = "a0e99841-438c-4a64-b679-ae501e7d6091"
     cartesia_voice_id_spanish: str = "5619d38c-cf51-4d8e-9575-48f61a280571"
 
