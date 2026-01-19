@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     openai_api_key: str = ""
-    openai_model: str = "gpt-4-turbo-preview"
+    openai_model: str = "gpt-4o-mini"  # Faster than gpt-4-turbo
 
     # Deepgram (STT)
     deepgram_api_key: str = ""

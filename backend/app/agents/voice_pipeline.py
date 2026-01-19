@@ -129,19 +129,29 @@ class VoicePipeline:
             self._speech_detected = True
 
     async def _process_transcript(self, text: str, detected_language: Optional[str]):
-        """Process a final transcript and generate response."""
+        """Process a final transcript and stream response sentence by sentence."""
         if not self.agent:
             return
 
         try:
-            # Process through agent
-            response, is_complete = await self.agent.process_user_input(
+            # Stream LLM response -> TTS -> Twilio sentence by sentence
+            self._speaking = True
+            is_complete = False
+            
+            async for sentence, complete in self.agent.process_user_input_streaming(
                 text,
                 detected_language
-            )
-
-            # Speak the response
-            await self._speak(response)
+            ):
+                if complete:
+                    is_complete = True
+                    break
+                    
+                if sentence:
+                    logger.info(f"Streaming sentence: {sentence[:40]}...")
+                    # Stream this sentence through TTS
+                    await self._speak_sentence(sentence)
+            
+            self._speaking = False
 
             # Check if call is complete
             if is_complete:
@@ -150,6 +160,7 @@ class VoicePipeline:
 
         except Exception as e:
             logger.error(f"Error processing transcript: {e}")
+            self._speaking = False
             # Speak error message
             error_msg = (
                 "Lo siento, tuve un problema. ¿Podría repetir eso?"
@@ -158,8 +169,37 @@ class VoicePipeline:
             )
             await self._speak(error_msg)
 
+    async def _speak_sentence(self, text: str):
+        """Stream a single sentence through TTS to Twilio."""
+        if not text:
+            return
+
+        try:
+            # Use streaming TTS for lower latency
+            async for audio_chunk in cartesia_tts.synthesize_stream(
+                text,
+                language=self.session.language
+            ):
+                # Convert from 24kHz PCM to 8kHz mulaw for Twilio
+                mulaw_chunk = self._convert_for_twilio(audio_chunk)
+                # Send chunk immediately
+                await self.on_audio_output(mulaw_chunk)
+
+        except Exception as e:
+            logger.error(f"Error in streaming TTS: {e}")
+            # Fallback to non-streaming
+            try:
+                audio_bytes = await cartesia_tts.synthesize(
+                    text,
+                    language=self.session.language
+                )
+                mulaw_audio = self._convert_for_twilio(audio_bytes)
+                await self.on_audio_output(mulaw_audio)
+            except Exception as e2:
+                logger.error(f"Fallback TTS also failed: {e2}")
+
     async def _speak(self, text: str):
-        """Convert text to speech and send to Twilio."""
+        """Convert text to speech and send to Twilio (for greetings and errors)."""
         if not text:
             return
 
@@ -167,20 +207,7 @@ class VoicePipeline:
         logger.info(f"Speaking: {text[:50]}...")
 
         try:
-            # Get TTS audio from Cartesia
-            audio_bytes = await cartesia_tts.synthesize(
-                text,
-                language=self.session.language
-            )
-            logger.info(f"TTS returned {len(audio_bytes)} bytes of audio")
-
-            # Convert from 24kHz PCM to 8kHz mulaw for Twilio
-            mulaw_audio = self._convert_for_twilio(audio_bytes)
-            logger.info(f"Converted to {len(mulaw_audio)} bytes of mulaw audio")
-
-            # Send audio to Twilio
-            await self.on_audio_output(mulaw_audio)
-
+            await self._speak_sentence(text)
         except Exception as e:
             logger.error(f"Error in TTS: {e}")
         finally:
@@ -316,10 +343,9 @@ class TwilioMediaStreamHandler:
             logger.warning(f"Cannot send audio: ws={bool(self._ws)}, stream_sid={self.stream_sid}")
             return
 
-        logger.info(f"Sending {len(audio_data)} bytes of audio to Twilio stream {self.stream_sid}")
-
         # Twilio expects base64-encoded audio in chunks
-        chunk_size = 640  # 40ms of 8kHz mulaw audio
+        # Use 160 bytes = 20ms of 8kHz mulaw audio (standard RTP packet size)
+        chunk_size = 160
         chunks_sent = 0
 
         for i in range(0, len(audio_data), chunk_size):
@@ -337,10 +363,9 @@ class TwilioMediaStreamHandler:
             except Exception as e:
                 logger.error(f"Error sending audio chunk {chunks_sent}: {e}")
                 break
-            # Small delay to control playback speed
-            await asyncio.sleep(0.04)
-        
-        logger.info(f"Sent {chunks_sent} audio chunks to Twilio")
+            # Minimal delay - Twilio buffers on their end
+            if chunks_sent % 10 == 0:  # Yield every 10 chunks (~200ms)
+                await asyncio.sleep(0.001)
 
     async def _on_call_complete(self):
         """Handle call completion and trigger Zappix flow."""

@@ -240,6 +240,76 @@ Mantenlo conversacional y apropiado para una llamada telefónica."""
 
         return response, is_complete
 
+    async def process_user_input_streaming(
+        self,
+        user_input: str,
+        detected_language: Optional[str] = None
+    ):
+        """
+        Process user input and stream agent response sentence by sentence.
+        
+        Yields:
+            Tuples of (sentence_text, is_call_complete)
+        """
+        # Update language if detected
+        if detected_language and detected_language.startswith("es"):
+            self.detected_language = Language.SPANISH
+            if self.session:
+                self.session.language = Language.SPANISH
+                await session_manager.update_session(self.session)
+
+        # Add user input to history
+        self.conversation_history.append({
+            "role": "user",
+            "content": user_input
+        })
+
+        # Process based on state and input
+        await self._process_state_transition(user_input)
+
+        # Stream response and yield sentences
+        buffer = ""
+        full_response = ""
+        sentence_endings = '.!?'
+        
+        async for chunk in self._generate_response_stream(user_input):
+            buffer += chunk
+            full_response += chunk
+            
+            # Check for sentence boundaries
+            while True:
+                # Find the first sentence ending
+                end_pos = -1
+                for ending in sentence_endings:
+                    pos = buffer.find(ending)
+                    if pos != -1 and (end_pos == -1 or pos < end_pos):
+                        end_pos = pos
+                
+                if end_pos != -1:
+                    # Extract sentence (including the ending punctuation)
+                    sentence = buffer[:end_pos + 1].strip()
+                    buffer = buffer[end_pos + 1:].lstrip()
+                    
+                    if sentence:
+                        yield sentence, False
+                else:
+                    break
+        
+        # Yield any remaining text
+        if buffer.strip():
+            yield buffer.strip(), False
+
+        # Add full response to history
+        self.conversation_history.append({
+            "role": "assistant",
+            "content": full_response
+        })
+
+        # Signal completion if needed
+        is_complete = self.state == ConversationState.COMPLETED
+        if is_complete:
+            yield "", True
+
     async def _process_state_transition(self, user_input: str):
         """Process state transitions based on user input."""
         input_lower = user_input.lower()
@@ -383,6 +453,14 @@ Return ONLY the JSON object, no other text."""
 
     async def _generate_response(self, user_input: str) -> str:
         """Generate agent response using OpenAI."""
+        # Collect streaming response into full text
+        full_response = ""
+        async for chunk in self._generate_response_stream(user_input):
+            full_response += chunk
+        return full_response
+
+    async def _generate_response_stream(self, user_input: str):
+        """Generate agent response using OpenAI with streaming."""
         system_prompt = self._get_system_prompt()
         state_prompt = self._get_state_prompt()
 
@@ -395,20 +473,25 @@ Return ONLY the JSON object, no other text."""
         messages.extend(self.conversation_history[-20:])
 
         try:
-            response = await self.client.chat.completions.create(
+            stream = await self.client.chat.completions.create(
                 model=self.settings.openai_model,
                 messages=messages,
                 temperature=0.7,
-                max_tokens=200
+                max_tokens=200,
+                stream=True
             )
 
-            return response.choices[0].message.content.strip()
+            async for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+
         except Exception as e:
             logger.error(f"Failed to generate response: {e}")
             # Fallback responses
             if self.detected_language == Language.SPANISH:
-                return "Lo siento, tuve un problema. ¿Podría repetir eso?"
-            return "I'm sorry, I had a moment. Could you please repeat that?"
+                yield "Lo siento, tuve un problema. ¿Podría repetir eso?"
+            else:
+                yield "I'm sorry, I had a moment. Could you please repeat that?"
 
     async def get_initial_greeting(self) -> str:
         """Return the initial greeting for the call (pre-canned for fast response)."""
